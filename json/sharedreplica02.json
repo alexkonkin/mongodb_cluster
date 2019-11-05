@@ -1,0 +1,9 @@
+rs.initiate(
+   {
+     _id : "shardreplica02",
+     members: [
+       { _id : 0, host : "mongodb-node3:27017" },
+       { _id : 1, host : "mongodb-node4:27017" }
+     ]
+   }
+ )
