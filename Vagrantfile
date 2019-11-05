@@ -24,7 +24,7 @@ $install_keepalived_haproxy = <<-SCRIPT
   echo $nod_ip
   echo $is_first_node
   sudo apt install keepalived haproxy mc -y
-  echo -e "192.168.1.11       srv1\n192.168.1.12       srv2\n172.16.94.11       mongodb-node1\n172.16.94.12       mongodb-node2\n172.16.94.13       mongodb-node3\n172.16.94.14       mongodb-node4\n172.16.94.15       mongodb-node5\n172.16.94.16       mongodb-node6"\n172.16.94.17       mongodb-configsvr1\n172.16.94.18       mongodb-configsvr2\n172.16.94.19       mongodb-router">> /etc/hosts
+  echo -e "192.168.1.11       srv1\n192.168.1.12       srv2\n172.16.94.11       mongodb-node1\n172.16.94.12       mongodb-node2\n172.16.94.13       mongodb-node3\n172.16.94.14       mongodb-node4\n172.16.94.15       mongodb-node5\n172.16.94.16       mongodb-node6\n172.16.94.17       mongodb-configsvr1\n172.16.94.18       mongodb-configsvr2\n172.16.94.19       mongodb-router1\n172.16.94.20       mongodb-router2\n192.168.1.100       mongodb-router">> /etc/hosts
 
 cat > /etc/haproxy/haproxy.cfg << "END"
 global
@@ -65,20 +65,19 @@ backend webservers
     server srv1 192.168.1.11:80 check cookie srv1
     server srv2 192.168.1.12:80 check cookie srv2
 
-frontend sql
-    bind 192.168.1.100:3306
+frontend mongos
+    bind 192.168.1.100:27017
     mode tcp
     option tcplog
-    default_backend dbservers
+    default_backend mongos_servers
 
-backend dbservers
+backend mongos_servers
     mode tcp
-    balance leastconn
-    option tcpka
-    option mysql-check user haproxy_user post-41
-    server mysql-node1 172.16.94.11:3306 check weight 1
-    server mysql-node2 172.16.94.12:3306 check weight 1
-    server mysql-node3 172.16.94.13:3306 check weight 1
+    balance roundrobin
+    option tcplog
+    server mongodb-router1 172.16.94.19:27017 check
+    server mongodb-router2 172.16.94.20:27017 check
+    redispatch
 END
 
 cat > /etc/keepalived/keepalived.conf << "END"
@@ -118,14 +117,21 @@ systemctl restart haproxy
 
 SCRIPT
 
+$install_misc_packages = <<-SCRIPT
+   apt update
+   apt install mc -y
+SCRIPT
+
 $install_mongodb_cluster = <<-SCRIPT
    nod_nam=$1
    nod_ip=$2
    is_first_node=$3
 
-
-   echo -e "192.168.1.11       srv1\n192.168.1.12       srv2\n172.16.94.11       mongodb-node1\n172.16.94.12       mongodb-node2\n172.16.94.13       mongodb-node3\n172.16.94.14       mongodb-node4\n172.16.94.15       mongodb-node5\n172.16.94.16       mongodb-node6"\n172.16.94.17       mongodb-configsvr1\n172.16.94.18       mongodb-configsvr2\n172.16.94.19       mongodb-router">> /etc/hosts
-
+   echo -e "192.168.1.11       srv1\n192.168.1.12       srv2\n172.16.94.11       mongodb-node1\n172.16.94.12       mongodb-node2\n172.16.94.13       mongodb-node3\n172.16.94.14       mongodb-node4\n172.16.94.15       mongodb-node5\n172.16.94.16       mongodb-node6\n172.16.94.17       mongodb-configsvr1\n172.16.94.18       mongodb-configsvr2\n172.16.94.19       mongodb-router1\n172.16.94.20       mongodb-router2\n192.168.1.100       mongodb-router">> /etc/hosts
+   apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 9DA31620334BD75D9DCB49F368818C72E52529D4
+   echo "deb [ arch=amd64 ] https://repo.mongodb.org/apt/ubuntu bionic/mongodb-org/4.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org.list
+   apt update
+   apt install mongodb-org -y
 
 SCRIPT
 
@@ -136,19 +142,20 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     srv1.vm.box = "bento/ubuntu-18.04"
     srv1.vm.hostname = "srv1"
     srv1.vm.network :private_network, ip: "192.168.1.11"
-    config.vm.provision "shell" do |script|
-       script.inline = $install_keepalived_haproxy
-       script.args = ["MASTER","101","192.168.1.11","192.168.1.12"]
+    config.vm.provision "script1", type: "shell" do |shell|
+       shell.inline = $install_keepalived_haproxy
+       shell.args = ["MASTER","101","192.168.1.11","192.168.1.12"]
     end
   end
+
 
   config.vm.define "srv2" do |srv2|
     srv2.vm.box = "bento/ubuntu-18.04"
     srv2.vm.hostname = "srv2"
     srv2.vm.network :private_network, ip: "192.168.1.12"
-    config.vm.provision "shell" do |script|
-       script.inline = $install_keepalived_haproxy
-       script.args = ["BACKUP","100","192.168.1.12","192.168.1.11"]
+    config.vm.provision "script1", type: "shell" do |shell|
+       shell.inline = $install_keepalived_haproxy
+       shell.args = ["BACKUP","100","192.168.1.12","192.168.1.11"]
     end
   end
 
@@ -156,9 +163,12 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     mongodb1.vm.box = "bento/ubuntu-18.04"
     mongodb1.vm.hostname = "mongodb-node1"
     mongodb1.vm.network :private_network, ip: "172.16.94.11"
-    config.vm.provision "shell" do |script|
-       script.inline = $install_mongodb_cluster
-       script.args = ["mongodb-node1","172.16.94.11","true"]
+       config.vm.provision "script1", type: "shell" do |shell|
+       shell.inline = $install_misc_packages
+    end
+    config.vm.provision "script2", type: "shell" do |shell|
+        shell.inline = $install_mongodb_cluster
+        shell.args = ["mongodb-node1","172.16.94.11","true"]
     end
   end
 
@@ -166,9 +176,12 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     mongodb2.vm.box = "bento/ubuntu-18.04"
     mongodb2.vm.hostname = "mongodb-node2"
     mongodb2.vm.network :private_network, ip: "172.16.94.12"
-    config.vm.provision "shell" do |script|
-       script.inline = $install_mongodb_cluster
-       script.args = ["mongodb-node2","172.16.94.12","false"]
+       config.vm.provision "script1", type: "shell" do |shell|
+       shell.inline = $install_misc_packages
+    end
+    config.vm.provision "script2", type: "shell" do |shell|
+        shell.inline = $install_mongodb_cluster
+        shell.args = ["mongodb-node2","172.16.94.12","false"]
     end
   end
 
@@ -176,9 +189,12 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     mongodb3.vm.box = "bento/ubuntu-18.04"
     mongodb3.vm.hostname = "mongodb-node3"
     mongodb3.vm.network :private_network, ip: "172.16.94.13"
-    config.vm.provision "shell" do |script|
-       script.inline = $install_mongodb_cluster
-       script.args = ["mongodb-node3","172.16.94.13","false"]
+       config.vm.provision "script1", type: "shell" do |shell|
+       shell.inline = $install_misc_packages
+    end
+    config.vm.provision "script2", type: "shell" do |shell|
+        shell.inline = $install_mongodb_cluster
+        shell.args = ["mongodb-node3","172.16.94.13","false"]
     end
    end
 
@@ -186,29 +202,38 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     mongodb4.vm.box = "bento/ubuntu-18.04"
     mongodb4.vm.hostname = "mongodb-node4"
     mongodb4.vm.network :private_network, ip: "172.16.94.14"
-    config.vm.provision "shell" do |script|
-       script.inline = $install_mongodb_cluster
-       script.args = ["mongodb-node4","172.16.94.14","false"]
+       config.vm.provision "script1", type: "shell" do |shell|
+       shell.inline = $install_misc_packages
     end
+    config.vm.provision "script2", type: "shell" do |shell|
+        shell.inline = $install_mongodb_cluster
+        shell.args = ["mongodb-node4","172.16.94.14","false"]
+    end	
    end
 
   config.vm.define "mongodb5" do |mongodb5|
     mongodb5.vm.box = "bento/ubuntu-18.04"
     mongodb5.vm.hostname = "mongodb-node5"
     mongodb5.vm.network :private_network, ip: "172.16.94.15"
-    config.vm.provision "shell" do |script|
-       script.inline = $install_mongodb_cluster
-       script.args = ["mongodb-node5","172.16.94.15","false"]
+       config.vm.provision "script1", type: "shell" do |shell|
+       shell.inline = $install_misc_packages
     end
+    config.vm.provision "script2", type: "shell" do |shell|
+        shell.inline = $install_mongodb_cluster
+        shell.args = ["mongodb-node5","172.16.94.15","false"]
+    end	
    end
 
   config.vm.define "mongodb6" do |mongodb6|
     mongodb6.vm.box = "bento/ubuntu-18.04"
     mongodb6.vm.hostname = "mongodb-node6"
     mongodb6.vm.network :private_network, ip: "172.16.94.16"
-    config.vm.provision "shell" do |script|
-       script.inline = $install_mongodb_cluster
-       script.args = ["mongodb-node6","172.16.94.15","false"]
+       config.vm.provision "script1", type: "shell" do |shell|
+       shell.inline = $install_misc_packages
+    end
+    config.vm.provision "script2", type: "shell" do |shell|
+        shell.inline = $install_mongodb_cluster
+        shell.args = ["mongodb-node6","172.16.94.15","false"]
     end
    end
 
@@ -216,9 +241,12 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     configsvr1.vm.box = "bento/ubuntu-18.04"
     configsvr1.vm.hostname = "mongodb-configsvr1"
     configsvr1.vm.network :private_network, ip: "172.16.94.17"
-    config.vm.provision "shell" do |script|
-       script.inline = $install_mongodb_cluster
-       script.args = ["mongodb-configsvr1","172.16.94.17","false"]
+       config.vm.provision "script1", type: "shell" do |shell|
+       shell.inline = $install_misc_packages
+    end
+    config.vm.provision "script2", type: "shell" do |shell|
+       shell.inline = $install_mongodb_cluster
+       shell.args = ["mongodb-configsvr1","172.16.94.17","false"]
     end
    end
 
@@ -226,9 +254,12 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     configsvr2.vm.box = "bento/ubuntu-18.04"
     configsvr2.vm.hostname = "mongodb-configsvr2"
     configsvr2.vm.network :private_network, ip: "172.16.94.18"
-    config.vm.provision "shell" do |script|
-       script.inline = $install_mongodb_cluster
-       script.args = ["mongodb-configsvr1","172.16.94.18","false"]
+       config.vm.provision "script1", type: "shell" do |shell|
+       shell.inline = $install_misc_packages
+    end
+    config.vm.provision "script2", type: "shell" do |shell|
+        shell.inline = $install_mongodb_cluster
+        shell.args = ["mongodb-configsvr2","172.16.94.18","false"]
     end
    end
 
@@ -236,9 +267,39 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     mongos.vm.box = "bento/ubuntu-18.04"
     mongos.vm.hostname = "mongodb-router"
     mongos.vm.network :private_network, ip: "172.16.94.19"
-    config.vm.provision "shell" do |script|
-       script.inline = $install_mongodb_cluster
-       script.args = ["mongodb-router","172.16.94.19","false"]
+       config.vm.provision "script1", type: "shell" do |shell|
+       shell.inline = $install_misc_packages
+    end
+    config.vm.provision "script2", type: "shell" do |shell|
+        shell.inline = $install_mongodb_cluster
+        shell.args = ["mongodb-router","172.16.94.19","false"]
+    end
+   end
+
+
+  config.vm.define "mongos1" do |mongos1|
+    mongos1.vm.box = "bento/ubuntu-18.04"
+    mongos1.vm.hostname = "mongodb-router1"
+    mongos1.vm.network :private_network, ip: "172.16.94.19"
+       config.vm.provision "script1", type: "shell" do |shell|
+       shell.inline = $install_misc_packages
+    end
+    config.vm.provision "script2", type: "shell" do |shell|
+        shell.inline = $install_mongodb_cluster
+        shell.args = ["mongodb-router1","172.16.94.19","false"]
+    end
+   end
+
+  config.vm.define "mongos2" do |mongos2|
+    mongos2.vm.box = "bento/ubuntu-18.04"
+    mongos2.vm.hostname = "mongodb-router2"
+    mongos2.vm.network :private_network, ip: "172.16.94.20"
+       config.vm.provision "script1", type: "shell" do |shell|
+       shell.inline = $install_misc_packages
+    end
+    config.vm.provision "script2", type: "shell" do |shell|
+        shell.inline = $install_mongodb_cluster
+        shell.args = ["mongodb-router2","172.16.94.20","false"]
     end
    end
 
