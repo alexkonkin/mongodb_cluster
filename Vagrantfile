@@ -263,20 +263,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     end
    end
 
-  config.vm.define "mongos" do |mongos|
-    mongos.vm.box = "bento/ubuntu-18.04"
-    mongos.vm.hostname = "mongodb-router"
-    mongos.vm.network :private_network, ip: "172.16.94.19"
-       config.vm.provision "script1", type: "shell" do |shell|
-       shell.inline = $install_misc_packages
-    end
-    config.vm.provision "script2", type: "shell" do |shell|
-        shell.inline = $install_mongodb_cluster
-        shell.args = ["mongodb-router","172.16.94.19","false"]
-    end
-   end
-
-
   config.vm.define "mongos1" do |mongos1|
     mongos1.vm.box = "bento/ubuntu-18.04"
     mongos1.vm.hostname = "mongodb-router1"
