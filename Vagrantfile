@@ -17,21 +17,27 @@ SCRIPT
 
 $install_keepalived_haproxy = <<-SCRIPT
   node=$1
-
-  echo $nod_nam
-  echo $nod_ip
-  echo $is_first_node
+  echo ""
+  echo "add service and run haproxy and keepalived on srv"$node
+  echo ""
   sudo apt install keepalived haproxy -y
+
+  rm -fv /etc/haproxy/haproxy.conf
+  rm -fv /etc/keepalived/keepalived.conf
 
   cp -pv /vagrant/srv${node}/haproxy.cfg /etc/haproxy/
   cp -pv /vagrant/srv${node}/keepalived.conf /etc/keepalived/
+  chmod a-x /etc/keepalived/keepalived.conf
 
-#allow binding to virtual IP of keepalived and apply this adjustment
-echo "net.ipv4.ip_nonlocal_bind=1" >> /etc/sysctl.conf
-sysctl -p
+  #allow binding to virtual IP of keepalived and apply this adjustment
+  echo "net.ipv4.ip_nonlocal_bind=1" >> /etc/sysctl.conf
+  sysctl -p
 
-systemctl start keepalived
-systemctl restart haproxy
+  systemctl daemon-reload
+  systemctl start keepalived
+  systemctl enable keepalived
+  systemctl restart haproxy
+  systemctl enable haproxy
 
 SCRIPT
 
